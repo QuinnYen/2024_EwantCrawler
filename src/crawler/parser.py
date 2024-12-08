@@ -78,13 +78,6 @@ class CourseParser:
 
     def process_all_courses(self) -> None:
         try:
-            # 點擊搜尋按鈕
-            search_button = self.wait.until(
-                EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btn-primary.hidden-xs"))
-            )
-            search_button.click()
-            time.sleep(2)
-            
             # 檢查是否需要搜尋
             if self.search_text:
                 search_input = self.wait.until(
@@ -94,9 +87,16 @@ class CourseParser:
                 search_input.send_keys(self.search_text)
                 
                 # 點擊搜尋按鈕
-                search_button.click()
-                time.sleep(2)
-
+                # search_button.click()
+                # time.sleep(2)
+                
+            # 點擊搜尋按鈕
+            search_button = self.wait.until(
+                EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btn-primary.hidden-xs"))
+            )
+            search_button.click()
+            time.sleep(2)
+            
             # 取得搜尋後的課程列表
             courses = self.get_course_rows()
             total_courses = len(courses)
@@ -131,7 +131,6 @@ class CourseParser:
             # 全部處理完成後發出完成信號
             if self.progress:
                 self.progress.emit("全部課程處理完成")
-                self.progress_updated.emit(100)  # 進度條設為100%
 
         except Exception as e:
             error_msg = f"處理課程列表時發生錯誤：{str(e)}"
