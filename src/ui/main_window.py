@@ -9,108 +9,105 @@ from PyQt6.QtWidgets import (
     QProgressBar,
     QTextEdit,
     QMessageBox,
-    QListWidget
+    QTableWidget,
+    QTableWidgetItem
 )
-import time
+from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
+import os
+
 from src.crawler.login import EwantLogin
 from src.crawler.parser import CourseParser
 from src.utils.config import Config
+from src.utils.resource_utils import ResourceUtils
 
 class CrawlerThread(QThread):
-   """處理爬蟲的工作執行緒"""
-   finished = pyqtSignal(bool, str)   # 信號：(是否成功, 訊息)
-   progress = pyqtSignal(str)         # 信號：進度訊息
-   data_ready = pyqtSignal(list)      # 信號：爬取到的資料
+    """處理爬蟲的工作執行緒"""
+    finished = pyqtSignal(bool, str)   # 信號：(是否成功, 訊息)
+    progress = pyqtSignal(str)         # 信號：進度訊息
+    data_ready = pyqtSignal(list)      # 信號：爬取到的資料
 
-   def __init__(self, username: str, password: str, search_text: str = None):
-       super().__init__()
-       self.username = username
-       self.password = password
-       self.search_text = search_text
-       self.login_manager = None
-       self.parser = None
-       self.stop_flag = False
-       
-   def run(self):
-       try:
-           # 執行登入
-           self.progress.emit("初始化登入...")
-           self.login_manager = EwantLogin(headless=False)
-           
-           self.progress.emit("開始登入...")
-           success, message = self.login_manager.login(self.username, self.password)
-           
-           if not success:
-               self.finished.emit(False, f"登入失敗：{message}")
-               return
+    def __init__(self, username: str, password: str, search_text: str = None):
+        super().__init__()
+        self.username = username
+        self.password = password
+        self.search_text = search_text
+        self.login_manager = None
+        self.parser = None
+        self.stop_flag = False
+        
+    def run(self):
+        try:
+            # 執行登入
+            self.progress.emit("初始化登入...")
+            self.login_manager = EwantLogin(headless=False)
+            
+            self.progress.emit("開始登入...")
+            success, message = self.login_manager.login(self.username, self.password)
+            
+            if not success:
+                self.finished.emit(False, f"登入失敗：{message}")
+                return
 
-           # 開始爬取資料
-           self.progress.emit("開始爬取課程資料...")
-           self.parser = CourseParser(
-               self.login_manager.get_driver(), 
-               progress=self.progress,
-               search_text=self.search_text
-           )
-           
-           try:
-               self.parser.process_all_courses()
-               self.finished.emit(True, "爬取完成")
-               
-           except Exception as e:
-               self.finished.emit(False, f"爬取過程發生錯誤：{str(e)}")
-               
-       except Exception as e:
-           self.finished.emit(False, f"執行過程發生錯誤：{str(e)}")
-       
-   def stop(self):
-       """停止爬蟲"""
-       self.stop_flag = True
-       if self.parser:
-           self.parser.stop_crawling = True
-       if self.login_manager:
-           self.login_manager.close()
+            # 開始爬取資料
+            self.progress.emit("開始爬取課程資料...")
+            self.parser = CourseParser(
+                self.login_manager.get_driver(), 
+                progress=self.progress,
+                search_text=self.search_text
+            )
+            
+            try:
+                self.parser.process_all_courses()
+                print(f"Crawler completed. Courses data: {self.parser.courses}")
+                self.finished.emit(True, "爬取完成")
+                self.data_ready.emit(self.parser.courses)  # 發送爬取到的課程資料
+                
+            except Exception as e:
+                self.finished.emit(False, f"爬取過程發生錯誤：{str(e)}")
+                
+        except Exception as e:
+            self.finished.emit(False, f"執行過程發生錯誤：{str(e)}")
+        
+    def stop(self):
+        """停止爬蟲"""
+        self.stop_flag = True
+        if self.parser:
+            self.parser.stop_crawling = True
+        if self.login_manager:
+            self.login_manager.close()
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("課程資料爬蟲工具")
         self.setMinimumSize(800, 600)
-        
-        # 初始化設定檔
-        self.config = Config()
+        self.setup_window_icon()
+        self.init_ui()
+        self.load_config()
         self.crawler_thread = None
-        
-        # 建立中央視窗
+    
+    def init_ui(self):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        
-        # 建立主要布局
         layout = QVBoxLayout(central_widget)
         
-        # 建立登入區域
+        # 登入區域
         login_group = QWidget()
         login_layout = QHBoxLayout(login_group)
         
-        # 帳號輸入
         username_label = QLabel("帳號:")
         self.username_input = QLineEdit()
         login_layout.addWidget(username_label)
         login_layout.addWidget(self.username_input)
         
-        # 密碼輸入
         password_label = QLabel("密碼:")
         self.password_input = QLineEdit()
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
         login_layout.addWidget(password_label)
         login_layout.addWidget(self.password_input)
         
-        # 讀取設定檔並填入帳密
-        saved_config = self.config.load_config()
-        self.username_input.setText(saved_config.get('username', ''))
-        self.password_input.setText(saved_config.get('password', ''))
-        
-        # 新增搜尋欄位
+        # 搜尋區域
         search_group = QWidget()
         search_layout = QHBoxLayout(search_group)
         
@@ -118,13 +115,11 @@ class MainWindow(QMainWindow):
         self.search_input = QLineEdit()
         search_layout.addWidget(search_label)
         search_layout.addWidget(self.search_input)
-
-        # 加入主布局 登入區域
+        
         layout.addWidget(login_group)
-        # 加入主布局 搜尋欄位
         layout.addWidget(search_group)
         
-        # 建立按鈕
+        # 按鈕區域
         button_group = QWidget()
         button_layout = QHBoxLayout(button_group)
         
@@ -148,13 +143,30 @@ class MainWindow(QMainWindow):
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
         layout.addWidget(self.log_text)
+        
+        # 課程列表
+        self.course_table = QTableWidget()
+        self.course_table.setColumnCount(2)
+        self.course_table.setHorizontalHeaderLabels(['課程名稱', '選修人數'])
+        self.course_table.horizontalHeader().setStretchLastSection(True)
+        self.course_table.verticalHeader().setVisible(False)
+        layout.addWidget(self.course_table)
 
-        # 建立用於顯示課程名稱的列表
-        # self.course_list = QListWidget()
-        # layout.addWidget(self.course_list)
+    def setup_window_icon(self):
+        """設定視窗圖示"""
+        icon_path = ResourceUtils.get_resource_path('icon.ico')
+        if icon_path:
+            app_icon = QIcon(icon_path)
+            self.setWindowIcon(app_icon)
+
+    def load_config(self):
+        """載入設定"""
+        self.config = Config()
+        saved_config = self.config.load_config()
+        self.username_input.setText(saved_config.get('username', ''))
+        self.password_input.setText(saved_config.get('password', ''))
 
     def start_crawling(self):
-        """開始爬取數據"""
         username = self.username_input.text()
         password = self.password_input.text()
         search_text = self.search_input.text()
@@ -164,25 +176,33 @@ class MainWindow(QMainWindow):
             return
 
         self._update_ui_state(is_crawling=True)
-        
-        self.config.save_config(
-            self.username_input.text(),
-            self.password_input.text()
-        )
+        self.config.save_config(username, password)
         
         self.log_message("開始爬取程序...")
         self.crawler_thread = CrawlerThread(username, password, search_text)
         self.crawler_thread.progress.connect(self.log_message)
         self.crawler_thread.finished.connect(self.handle_crawler_result)
-        self.crawler_thread.data_ready.connect(self.handle_crawler_data)
+        self.crawler_thread.data_ready.connect(self.update_course_table)
         self.crawler_thread.start()
+
+    def update_course_table(self, courses):
+        """更新課程表格"""
+        print(f"Received courses data: {courses}")  # 加入除錯訊息
+        self.course_table.setRowCount(len(courses))
+        for row, course in enumerate(courses):
+            self.course_table.setItem(row, 0, QTableWidgetItem(course['name']))
+            self.course_table.setItem(row, 1, QTableWidgetItem(str(course['enrolled_count'])))
+        
+        # 調整欄寬
+        self.course_table.resizeColumnToContents(0)
+        self.course_table.resizeColumnToContents(1)
 
     def stop_crawling(self):
         """停止爬取"""
         if self.crawler_thread and self.crawler_thread.isRunning():
             self.log_message("正在停止爬蟲...")
             self.crawler_thread.stop()
-            self.crawler_thread.wait()  # 等待執行緒結束
+            self.crawler_thread.wait()
             self.crawler_thread = None
             self._update_ui_state(is_crawling=False)
     
@@ -224,11 +244,7 @@ class MainWindow(QMainWindow):
 
     def handle_crawler_data(self, data: list):
         """處理爬取到的資料"""
-        # TODO: 實作資料處理邏輯
-        """處理爬取到的資料"""
-        for course in data:
-            self.course_list.addItem(course['name'])
-        pass
+        self.update_course_table(data)
 
     def closeEvent(self, event):
         """視窗關閉事件"""
