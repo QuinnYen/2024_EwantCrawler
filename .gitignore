@@ -1,5 +1,10 @@
+# 忽略 資料夾
 /.vscode
-/config.json
 /venv
 /dist
 /build
+__pycache__/
+
+# 忽略 檔案
+*.spec
+*.pyc
