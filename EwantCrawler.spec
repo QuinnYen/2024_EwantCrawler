@@ -44,5 +44,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['resources\\icon.ico'],
+    icon=['D:\\Project\\Professor_Program\\113-01_EwantCrawler\\MainProgram\\resources\\icon.ico'],
 )
