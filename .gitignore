@@ -3,7 +3,7 @@
 /venv
 /dist
 /build
-__pycache__/
+**/__pycache__
 
 # 忽略 檔案
 *.spec
