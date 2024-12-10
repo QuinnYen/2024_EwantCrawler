@@ -3,7 +3,10 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, WebDriverException
-from typing import Tuple, Optional
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.service import Service
+from typing import Tuple
+
 
 class EwantLogin:
     def __init__(self, headless: bool = False):
@@ -19,13 +22,33 @@ class EwantLogin:
     def init_driver(self) -> None:
         """初始化瀏覽器驅動"""
         options = webdriver.ChromeOptions()
+
+        # 關閉Chrome密碼儲存提示
+        prefs = {
+            "credentials_enable_service": False,
+            "profile.password_manager_enabled": False
+        }
+        options.add_experimental_option("prefs", prefs)
+
         if self.headless:
             options.add_argument('--headless')
         options.add_argument('--disable-gpu')
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
-        
-        self.driver = webdriver.Chrome(options=options)
+        options.add_argument('--disable-notifications')  # 禁用通知
+        options.add_argument('--disable-popup-blocking')  # 禁用彈窗阻擋
+        options.add_argument('--disable-infobars')  # 禁用信息列        
+        options.add_argument('--disable-extensions')  # 禁用擴展
+        options.add_argument("--disable-gpu") # 禁用GPU加速
+        options.add_argument('--window-size=1920,1080')  # 設定視窗大小
+        options.add_experimental_option('excludeSwitches', ['enable-logging', 'enable-automation'])  # 禁用自動控制提示
+
+        # 设置user-agent
+        options.add_argument(
+            "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.69 Safari/537.36")
+
+        # 使用 WebDriver Manager 自動管理 ChromeDriver
+        self.driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
         self.driver.implicitly_wait(180)
 
     def login(self, username: str, password: str) -> Tuple[bool, str]:
@@ -40,10 +63,20 @@ class EwantLogin:
         try:
             if not self.driver:
                 self.init_driver()
-            
+                
             # 訪問登入頁面
             self.driver.get(self.login_url)
             
+            # 處理可能出現的警告視窗
+            try:
+                alert = self.driver.switch_to.alert
+                alert_text = alert.text
+                alert.accept()  # 點擊確定按鈕
+                # 重新載入頁面
+                self.driver.get(self.login_url)
+            except:
+                pass  # 沒有警告視窗就繼續
+                
             # 等待並點選同意條款
             agree_checkbox = WebDriverWait(self.driver, 10).until(
                 EC.presence_of_element_located((By.ID, "agree"))
@@ -71,8 +104,16 @@ class EwantLogin:
             )
             submit_button.click()
             
-            # 等待登入完成並點擊搜尋按鈕
+            # 等待登入完成
             try:
+                # 再次處理可能出現的警告視窗
+                try:
+                    alert = self.driver.switch_to.alert
+                    alert_text = alert.text
+                    alert.accept()
+                except:
+                    pass
+                    
                 WebDriverWait(self.driver, 10).until(
                     lambda driver: driver.current_url != self.login_url
                 )
