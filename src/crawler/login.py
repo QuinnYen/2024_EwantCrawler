@@ -139,10 +139,7 @@ class EwantLogin:
         except TimeoutException:
             return False, "等待元素超時"
         except WebDriverException as e:
-            page_source = self.driver.page_source
-            with open('error_page.html', 'w', encoding='utf-8') as f:
-                f.write(page_source)
-            return False, f"瀏覽器錯誤：{str(e)}\n已保存頁面內容到 error_page.html"
+            return False, f"瀏覽器錯誤：{str(e)}"
         except Exception as e:
             return False, f"未知錯誤：{str(e)}"
     

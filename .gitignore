@@ -8,3 +8,5 @@
 # 忽略 檔案
 *.spec
 *.py[cod]
+*.html
+*.xlsx
