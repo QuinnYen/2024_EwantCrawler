@@ -44,7 +44,7 @@ class CrawlerThread(QThread):
         try:
             # 執行登入
             self.progress.emit("初始化登入...")
-            self.login_manager = EwantLogin(headless=False)
+            self.login_manager = EwantLogin(headless=True)
             
             self.progress.emit("開始登入...")
             success, message = self.login_manager.login(self.username, self.password)
@@ -103,6 +103,8 @@ class MainWindow(QMainWindow):
         self.init_ui()
         self.load_config()
         self.crawler_thread = None
+        self.last_valid_row_count = 0
+        self.courses = []
     
     def init_ui(self):
         central_widget = QWidget()
@@ -216,14 +218,19 @@ class MainWindow(QMainWindow):
         self.password_input.setText(saved_config.get('password', ''))
 
     def start_crawling(self):
+        """開始爬蟲"""
+        # 取得使用者輸入、密碼、搜尋課程
         username = self.username_input.text()
         password = self.password_input.text()
         search_text = self.search_input.text()
-
         if not username or not password:
-            QMessageBox.warning(self, "警告", "請輸入帳號和密碼")
-            return
-            
+                    QMessageBox.warning(self, "警告", "請輸入帳號和密碼")
+                    return
+        
+        # 清空課程表格
+        self.courses = []
+        self.last_valid_row_count = 0
+
         # 檢查是否至少選擇一個狀態
         status_filters = []
         if self.ongoing_checkbox.isChecked():
@@ -232,7 +239,6 @@ class MainWindow(QMainWindow):
             status_filters.append("即將開課")
         if self.finished_checkbox.isChecked():
             status_filters.append("已結束")
-            
         if not status_filters:
             QMessageBox.warning(self, "警告", "請至少選擇一種課程狀態")
             return
@@ -257,13 +263,19 @@ class MainWindow(QMainWindow):
     def update_course_table(self, courses):
         """更新課程表格"""
         try:
+            # 獲取最後有效的資料列
+            if self.crawler_thread and not self.crawler_thread.stop_flag:
+                self.last_valid_row_count = len(courses)
+                self.courses = courses
+            else:
+                courses = courses[:self.last_valid_row_count]
+            
             self.course_table.setRowCount(len(courses))
             
             for row, course in enumerate(courses):
                 try:
                     # 設定課程狀態
                     self.course_table.setItem(row, 0, QTableWidgetItem(course.get('status', '')))
-                    
                     # 設定課程名稱
                     self.course_table.setItem(row, 1, QTableWidgetItem(course['name']))
                     
@@ -299,10 +311,8 @@ class MainWindow(QMainWindow):
                 except Exception as e:
                     self.log_message(f"更新第 {row + 1} 筆資料時發生錯誤：{str(e)}")
             
-            # 調整欄寬
+            # 調整欄寬並滾動到最下方
             self.course_table.resizeColumnsToContents()
-
-            # 滾動到最下方
             self.course_table.scrollToBottom()
             self.log_message(f"已更新第{len(courses)}筆資料進入表格")
 
@@ -329,6 +339,9 @@ class MainWindow(QMainWindow):
             self.log_message("正在停止爬蟲...")
             self.crawler_thread.stop()
             self.crawler_thread.wait()
+            self.crawler_thread = None
+            if hasattr(self, 'course_table') and self.courses:
+                self.update_course_table(self.courses)
             self.crawler_thread = None
             self._update_ui_state(is_crawling=False)
     
