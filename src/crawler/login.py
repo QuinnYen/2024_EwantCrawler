@@ -49,7 +49,7 @@ class EwantLogin:
 
         # 使用 WebDriver Manager 自動管理 ChromeDriver
         self.driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
-        self.driver.implicitly_wait(180)
+        self.driver.implicitly_wait(30)
 
     def login(self, username: str, password: str) -> Tuple[bool, str]:
         """

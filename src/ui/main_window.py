@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QCheckBox
 )
 from PyQt6.QtGui import QIcon
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
 import os
 
 from src.crawler.login import EwantLogin
@@ -92,9 +92,38 @@ class CrawlerThread(QThread):
         if self.parser:
             self.parser.stop_crawling = True
         if self.login_manager:
-            self.login_manager.close()
+            try:
+                # 設定較短的超時時間
+                self.login_manager.driver.set_page_load_timeout(5)
+                self.login_manager.driver.set_script_timeout(5)
+                self.login_manager.close()
+            except Exception as e:
+                print(f"關閉瀏覽器時發生錯誤: {str(e)}")
+            finally:
+                self.login_manager = None
+
+class StopWorker(QObject):
+    """停止爬蟲的工作執行緒"""
+    finished = pyqtSignal()
+    
+    def __init__(self, crawler_thread):
+        super().__init__()
+        self.crawler_thread = crawler_thread
+    
+    def run(self):
+        try:
+            if self.crawler_thread:
+                self.crawler_thread.stop()
+                self.crawler_thread.wait()
+        except Exception as e:
+            print(f"停止爬蟲時發生錯誤: {str(e)}")
+        finally:
+            self.finished.emit()
 
 class MainWindow(QMainWindow):
+    """主視窗"""
+    # 信號
+    stop_finished = pyqtSignal()
     def __init__(self):
         super().__init__()
         self.setWindowTitle("課程資料爬蟲工具")
@@ -105,13 +134,14 @@ class MainWindow(QMainWindow):
         self.crawler_thread = None
         self.last_valid_row_count = 0
         self.courses = []
+        self.is_stopping = False
     
     def init_ui(self):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
         
-        # 登入區域
+        # ===帳號輸入區域===
         login_group = QWidget()
         login_layout = QHBoxLayout(login_group)
         
@@ -120,13 +150,42 @@ class MainWindow(QMainWindow):
         login_layout.addWidget(username_label)
         login_layout.addWidget(self.username_input)
         
+        # ===密碼輸入區域===
         password_label = QLabel("密碼:")
+        password_container = QWidget()
+        password_layout = QHBoxLayout(password_container)
+        password_layout.setContentsMargins(0, 0, 0, 0)
+        password_layout.setSpacing(2)
+        
+        # 密碼輸入框
         self.password_input = QLineEdit()
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
-        login_layout.addWidget(password_label)
-        login_layout.addWidget(self.password_input)
         
-        # 搜尋區域
+        # 檢視密碼按鈕
+        self.toggle_password_btn = QPushButton("👁")
+        self.toggle_password_btn.setFixedWidth(25)
+        self.toggle_password_btn.setStyleSheet("""
+            QPushButton {
+                border: none;
+                background-color: transparent;
+                padding: 0px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #f0f0f0;
+            }
+        """)
+        self.toggle_password_btn.clicked.connect(self.toggle_password_visibility)
+        self.toggle_password_btn.setToolTip("顯示密碼")
+
+        # 將元件加入密碼容器
+        password_layout.addWidget(self.password_input)
+        password_layout.addWidget(self.toggle_password_btn)
+        
+        login_layout.addWidget(password_label)
+        login_layout.addWidget(password_container)
+        
+        # ===搜尋區域===
         search_group = QWidget()
         search_layout = QHBoxLayout(search_group)
         
@@ -160,7 +219,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(search_group)
         layout.addWidget(status_group)
         
-        # 按鈕區域
+        # ===按鈕區域===
         button_group = QWidget()
         button_layout = QHBoxLayout(button_group)
         
@@ -180,27 +239,46 @@ class MainWindow(QMainWindow):
         
         layout.addWidget(button_group)
         
-        # 日誌視窗
+        # ===日誌視窗===
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
         layout.addWidget(self.log_text)
         
         # 課程列表
         self.course_table = QTableWidget()
-        self.course_table.setColumnCount(8)
+        self.course_table.setColumnCount(20)
         self.course_table.setHorizontalHeaderLabels([
             '課程狀態',
-            '課程名稱', 
-            '選修人數(台灣)', 
+            '課程名稱',
+            '開始時間',
+            '結束時間', 
+            '選修人數(台灣)',
             '選修人數(中國大陸)',
             '選修人數(其他)',
             '通過人數(台灣)',
             '通過人數(中國大陸)',
-            '通過人數(其他)'
+            '通過人數(其他)',
+            '影片瀏覽次數(台灣)',
+            '影片瀏覽次數(中國大陸)',
+            '影片瀏覽次數(其他)',
+            '作業測驗作答次數(台灣)',
+            '作業測驗作答次數(中國大陸)',
+            '作業測驗作答次數(其他)',
+            '講義參考資料瀏覽次數(台灣)',
+            '講義參考資料瀏覽次數(中國大陸)',
+            '講義參考資料瀏覽次數(其他)',
+            '討論次數'
         ])
+
+        # 設定表格屬性
         self.course_table.horizontalHeader().setStretchLastSection(True)
         self.course_table.verticalHeader().setVisible(False)
         self.course_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+
+        # 設定表格的水平捲動
+        self.course_table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.course_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
         layout.addWidget(self.course_table)
 
     def setup_window_icon(self):
@@ -209,7 +287,18 @@ class MainWindow(QMainWindow):
         if icon_path:
             app_icon = QIcon(icon_path)
             self.setWindowIcon(app_icon)
-
+    
+    def toggle_password_visibility(self):
+        """切換密碼可見性"""
+        if self.password_input.echoMode() == QLineEdit.EchoMode.Password:
+            self.password_input.setEchoMode(QLineEdit.EchoMode.Normal)
+            self.toggle_password_btn.setText("🔒")  # 改用鎖定符號
+            self.toggle_password_btn.setToolTip("隱藏密碼")
+        else:
+            self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+            self.toggle_password_btn.setText("👁")  # 改用眼睛符號
+            self.toggle_password_btn.setToolTip("顯示密碼")
+    
     def load_config(self):
         """載入設定"""
         self.config = Config()
@@ -260,6 +349,22 @@ class MainWindow(QMainWindow):
 
         self.crawler_thread.start()
 
+    def _create_table_item(self, value, is_numeric=False):
+        """建立表格項目"""
+        if is_numeric:
+            try:
+                # 移除任何非數字字元並轉換為整數
+                number = int(''.join(filter(str.isdigit, str(value))))
+                item = QTableWidgetItem()
+                item.setData(Qt.ItemDataRole.DisplayRole, number)
+            except (ValueError, TypeError):
+                item = QTableWidgetItem('0')
+                item.setData(Qt.ItemDataRole.DisplayRole, 0)
+        else:
+            item = QTableWidgetItem(str(value))
+        
+        return item
+
     def update_course_table(self, courses):
         """更新課程表格"""
         try:
@@ -274,32 +379,50 @@ class MainWindow(QMainWindow):
             
             for row, course in enumerate(courses):
                 try:
-                    # 設定課程狀態
-                    self.course_table.setItem(row, 0, QTableWidgetItem(course.get('status', '')))
-                    # 設定課程名稱
-                    self.course_table.setItem(row, 1, QTableWidgetItem(course['name']))
+                    # 設定基本資訊
+                    self.course_table.setItem(row, 0, self._create_table_item(course.get('status', '')))
+                    self.course_table.setItem(row, 1, self._create_table_item(course['name']))
+                    self.course_table.setItem(row, 2, self._create_table_item(course.get('start_time', '')))
+                    self.course_table.setItem(row, 3, self._create_table_item(course.get('end_time', '')))
                     
                     # 設定選修和通過人數資料
                     if 'stats' in course and course['stats']:
                         stats = course['stats']
 
-                        # 選修人數
-                        self.course_table.setItem(row, 2, QTableWidgetItem(str(stats['選修人數']['台灣'])))
-                        self.course_table.setItem(row, 3, QTableWidgetItem(str(stats['選修人數']['中國大陸'])))
-                        self.course_table.setItem(row, 4, QTableWidgetItem(str(stats['選修人數']['其他'])))
-                        
-                        # 通過人數
-                        self.course_table.setItem(row, 5, QTableWidgetItem(str(stats['通過人數']['台灣'])))
-                        self.course_table.setItem(row, 6, QTableWidgetItem(str(stats['通過人數']['中國大陸'])))
-                        self.course_table.setItem(row, 7, QTableWidgetItem(str(stats['通過人數']['其他'])))
+                        numeric_items = [
+                            stats['選修人數']['台灣'],
+                            stats['選修人數']['中國大陸'],
+                            stats['選修人數']['其他'],
+                            stats['通過人數']['台灣'],
+                            stats['通過人數']['中國大陸'],
+                            stats['通過人數']['其他'],
+                            stats.get('影片瀏覽次數', {}).get('台灣', 0),
+                            stats.get('影片瀏覽次數', {}).get('中國大陸', 0),
+                            stats.get('影片瀏覽次數', {}).get('其他', 0),
+                            stats.get('作業測驗作答次數', {}).get('台灣', 0),
+                            stats.get('作業測驗作答次數', {}).get('中國大陸', 0),
+                            stats.get('作業測驗作答次數', {}).get('其他', 0),
+                            stats.get('講義參考資料瀏覽次數', {}).get('台灣', 0),
+                            stats.get('講義參考資料瀏覽次數', {}).get('中國大陸', 0),
+                            stats.get('講義參考資料瀏覽次數', {}).get('其他', 0),
+                            stats.get('討論次數', 0)
+                        ]
+
+                        # 設定所有數字欄位
+                        for col, value in enumerate(numeric_items, start=4):
+                            item = self._create_table_item(value, is_numeric=True)
+                            # 設定對齊方式為靠右
+                            item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                            self.course_table.setItem(row, col, item)
+                    
                     else:
                         # 如果沒有統計資料，填入空值
-                        for col in range(2, 8):
+                        for col in range(4, 20):
                             self.course_table.setItem(row, col, QTableWidgetItem('0'))
                         self.log_message(f"第 {row + 1} 筆課程缺少統計資料")
                     
                     # 設定每個儲存格的對齊方式
-                    for col in range(8):
+                    for col in range(20):
                         item = self.course_table.item(row, col)
                         if item:
                             # 課程名稱靠左，其他靠右對齊
@@ -318,7 +441,7 @@ class MainWindow(QMainWindow):
 
             # 設定最小欄寬
             min_width = 80
-            for col in range(2, 8):  # 數字欄位最小寬度
+            for col in range(2, 20):
                 if self.course_table.columnWidth(col) < min_width:
                     self.course_table.setColumnWidth(col, min_width)
             
@@ -335,15 +458,32 @@ class MainWindow(QMainWindow):
 
     def stop_crawling(self):
         """停止爬取"""
-        if self.crawler_thread and self.crawler_thread.isRunning():
+        if not self.is_stopping and self.crawler_thread and self.crawler_thread.isRunning():
+            self.is_stopping = True
             self.log_message("正在停止爬蟲...")
-            self.crawler_thread.stop()
-            self.crawler_thread.wait()
+            self.stop_button.setEnabled(False)
+            
+            # 停止爬蟲執行緒
+            if self.crawler_thread:
+                self.crawler_thread.stop()
+                self.crawler_thread.wait()  # 等待執行緒結束
+                
+            # 更新介面
+            self.is_stopping = False
             self.crawler_thread = None
             if hasattr(self, 'course_table') and self.courses:
                 self.update_course_table(self.courses)
-            self.crawler_thread = None
             self._update_ui_state(is_crawling=False)
+            self.log_message("爬蟲已停止")
+    
+    def on_stop_finished(self):
+        """停止完成後的處理"""
+        self.is_stopping = False
+        self.crawler_thread = None
+        if hasattr(self, 'course_table') and self.courses:
+            self.update_course_table(self.courses)
+        self._update_ui_state(is_crawling=False)
+        self.log_message("爬蟲已停止")
     
     def export_report(self):
         """匯出報表"""
@@ -366,7 +506,7 @@ class MainWindow(QMainWindow):
         self.stop_button.setEnabled(is_crawling)
         self.username_input.setEnabled(not is_crawling)
         self.password_input.setEnabled(not is_crawling)
-        self.export_button.setEnabled(not is_crawling)
+        self.export_button.setEnabled(not is_crawling and self.course_table.rowCount() > 0)
 
     def handle_crawler_result(self, success: bool, message: str):
         """處理爬蟲結果"""

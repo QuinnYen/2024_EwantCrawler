@@ -41,13 +41,25 @@ class CourseExporter:
             # 設定標題列
             headers = [
                 "課程狀態",
-                "課程名稱", 
-                "選修人數(台灣)", 
-                "選修人數(中國大陸)", 
-                "選修人數(其他)", 
-                "通過人數(台灣)", 
-                "通過人數(中國大陸)", 
-                "通過人數(其他)"
+                "課程名稱",
+                "開始時間",
+                "結束時間",
+                "選修人數(台灣)",
+                "選修人數(中國大陸)",
+                "選修人數(其他)",
+                "通過人數(台灣)",
+                "通過人數(中國大陸)",
+                "通過人數(其他)",
+                "影片瀏覽次數(台灣)",
+                "影片瀏覽次數(中國大陸)",
+                "影片瀏覽次數(其他)",
+                "作業測驗作答次數(台灣)",
+                "作業測驗作答次數(中國大陸)",
+                "作業測驗作答次數(其他)",
+                "講義參考資料瀏覽次數(台灣)",
+                "講義參考資料瀏覽次數(中國大陸)",
+                "講義參考資料瀏覽次數(其他)",
+                "討論次數"
             ]
             sheet.append(headers)
             
@@ -61,7 +73,10 @@ class CourseExporter:
                 cell.fill = header_fill
                 cell.alignment = header_alignment
                 # 設定欄寬
-                sheet.column_dimensions[cell.column_letter].width = 20 if idx != 1 else 40
+                if idx == 1:  # 課程名稱欄位
+                    sheet.column_dimensions[cell.column_letter].width = 40
+                else:  # 其他欄位
+                    sheet.column_dimensions[cell.column_letter].width = 15
             
             # 寫入課程資料
             row_count = self.table_widget.rowCount()
@@ -69,7 +84,19 @@ class CourseExporter:
                 course_data = []
                 for col in range(self.table_widget.columnCount()):
                     item = self.table_widget.item(row, col)
-                    course_data.append(item.text() if item else "")
+                    if col >= 4:  # 數字欄位
+                        try:
+                            original_value = item.text() if item else ""
+                            # 嘗試轉換為數字，如果失敗就保留原始值
+                            try:
+                                value = int(original_value)
+                                course_data.append(value)
+                            except ValueError:
+                                course_data.append(original_value)
+                        except:
+                            course_data.append("")
+                    else:  # 文字欄位
+                        course_data.append(item.text() if item else "")
                 sheet.append(course_data)
             
             # 設定資料列樣式

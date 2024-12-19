@@ -9,7 +9,7 @@ import time
 class CourseParser:
     def __init__(self, driver, progress=None, search_text=None, status_filters=None):
         self.driver = driver
-        self.wait = WebDriverWait(driver, 180)
+        self.wait = WebDriverWait(driver, 30)
         self.progress = progress
         self.stop_crawling = False
         self.search_text = search_text
@@ -17,6 +17,7 @@ class CourseParser:
         self.courses = []
 
     def get_course_rows(self) -> List[Dict]:
+        """抓取課程列表"""
         try:
             table = self.wait.until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, ".table-responsive table"))
@@ -37,6 +38,8 @@ class CourseParser:
                             courses.append({
                                 'name': cells[2].text.strip(),
                                 'status': status,
+                                'start_time': cells[4].text.strip(),
+                                'end_time': cells[5].text.strip(),
                                 'row_idx': idx,
                                 'enrolled_count': 0
                             })
@@ -56,49 +59,82 @@ class CourseParser:
             raise Exception("無法載入課程列表")
         
     def get_enrolled_count(self) -> Dict:
-        """抓取課程選修資訊"""
+        """抓取課程相關統計資訊"""
         try:
             # 找到課程選修資訊表格
-            table = self.driver.find_element(By.CSS_SELECTOR, ".table-responsive table")
-            rows = table.find_elements(By.TAG_NAME, "tr")
+            # tables = self.driver.find_elements(By.CSS_SELECTOR, ".table-responsive table")
+            # 直接等待特定表格出現
+            self.wait.until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, ".table-responsive"))
+            )
             
             # 初始化回傳的資料結構
             stats = {
-                '選修人數': {
-                    '台灣': 0,
-                    '中國大陸': 0,
-                    '其他': 0
-                },
-                '通過人數': {
-                    '台灣': 0,
-                    '中國大陸': 0,
-                    '其他': 0
-                }
+                '選修人數': {'台灣': 0, '中國大陸': 0, '其他': 0},
+                '通過人數': {'台灣': 0, '中國大陸': 0, '其他': 0},
+                '影片瀏覽次數': {'台灣': 0, '中國大陸': 0, '其他': 0},
+                '作業測驗作答次數': {'台灣': 0, '中國大陸': 0, '其他': 0},
+                '講義參考資料瀏覽次數': {'台灣': 0, '中國大陸': 0, '其他': 0},
+                '討論次數': 0
             }
             
-            current_type = '選修人數'  # 預設類型
+            # 直接找到目標表格
+            tables = self.driver.find_elements(
+                By.CSS_SELECTOR, 
+                "section.panel .table-responsive table"
+            )
+            current_type = '選修人數'
             
-            for row in rows:
-                cells = row.find_elements(By.TAG_NAME, "td")
-                if len(cells) >= 2:
-                    if len(cells) == 3:
-                        current_type = cells[0].text.strip()
-                        region = cells[1].text.strip()
-                        count = cells[2].text.strip()
-                    else:
-                        region = cells[0].text.strip()
-                        count = cells[1].text.strip()
-                    
-                    # 只處理有效的地區資料
-                    if region in ["台灣", "中國大陸", "其他"]:
-                        stats[current_type][region] = int(count)
+            for table in tables:
+                try:
+                    rows = table.find_elements(By.TAG_NAME, "tr")
+                    for row in rows:
+                        cells = row.find_elements(By.TAG_NAME, "td")
+                        if len(cells) >= 2:
+                            # 解析列的資料
+                            if len(cells) == 3:  # 包含類型的列
+                                current_type = cells[0].text.strip()
+                                region = cells[1].text.strip()
+                                count = self._parse_number(cells[2].text.strip())
+                            else:  # 一般資料列
+                                region = cells[0].text.strip()
+                                count = self._parse_number(cells[1].text.strip())
+                            
+                            # 只處理有效的地區資料
+                            if region in ["台灣", "中國大陸", "其他"]:
+                                if current_type in stats and isinstance(stats[current_type], dict):
+                                    stats[current_type][region] = count
+                except Exception as e:
+                    print(f"處理表格時發生錯誤: {str(e)}")
+                    continue
+            
+            # 平行處理討論次數
+            try:
+                discussion_stats = self.driver.find_elements(
+                    By.CSS_SELECTOR, 
+                    ".panel-heading span.badge"
+                )
+                if discussion_stats:
+                    stats['討論次數'] = self._parse_number(discussion_stats[0].text.strip())
+            except Exception as e:
+                if self.progress:
+                    self.progress.emit(f"處理討論次數時發生錯誤: {str(e)}")
             
             return stats
-            
+                
         except Exception as e:
-            print(f"抓取選修資訊時發生錯誤: {str(e)}")
+            print(f"抓取統計資訊時發生錯誤: {str(e)}")
             return None
 
+    def _parse_number(self, text: str) -> int:
+        """解析數字文字"""
+        try:
+            # 移除所有非數字字元
+            number = ''.join(filter(str.isdigit, text))
+            return int(number) if number else 0
+        except:
+            return 0
+    
     def enter_course(self, course_idx: int) -> Tuple[bool, Dict]:
         """進入課程並抓取資料"""
         try:
@@ -218,12 +254,23 @@ class CourseParser:
             return []
 
     def back_to_course_list(self) -> bool:
+        """返回課程列表頁面"""
         try:
-            # 從課程摘要頁面返回兩次
+            # 使用歷史返回保留搜尋狀態
             self.driver.execute_script("window.history.go(-2)")
-            time.sleep(2)
-            self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, ".table-responsive table")))
+            
+            # 使用明確的等待替代固定延遲
+            self.wait.until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, ".table-responsive table"))
+            )
+            
+            # 確保表格已載入（可選，如果發現有時候會抓不到資料再加入）
+            # self.wait.until(
+            #     lambda driver: len(driver.find_elements(By.CSS_SELECTOR, "tbody tr")) > 0
+            # )
+            
             return True
         except Exception as e:
-            print(f"返回課程列表時發生錯誤: {str(e)}")
+            if self.progress:
+                self.progress.emit(f"返回課程列表時發生錯誤: {str(e)}")
             return False

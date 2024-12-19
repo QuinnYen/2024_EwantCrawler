@@ -1,12 +1,12 @@
 import os
 import sys
 
+# 設定環境變數
 def setup_environment():
     if getattr(sys, 'frozen', False):
-        # 如果是打包後的執行檔
+        # 打包執行檔
         base_path = os.path.dirname(sys.executable)
         if hasattr(sys, '_MEIPASS'):
-            # PyInstaller 臨時資料夾
             base_path = sys._MEIPASS
     else:
         # 開發環境
