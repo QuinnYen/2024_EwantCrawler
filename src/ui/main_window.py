@@ -63,7 +63,9 @@ class CrawlerThread(QThread):
                 self.login_manager.get_driver(), 
                 progress=self.progress,
                 search_text=self.search_text,
-                status_filters=self.status_filters
+                status_filters=self.status_filters,
+                start_date=self.start_date,
+                end_date=self.end_date
             )
             
             self.parser.data_ready = self.data_ready
@@ -188,7 +190,7 @@ class MainWindow(QMainWindow):
         
         login_layout.addWidget(password_label)
         login_layout.addWidget(password_container)
-        
+
         # ===搜尋區域===
         search_group = QWidget()
         search_layout = QHBoxLayout(search_group)
@@ -223,52 +225,65 @@ class MainWindow(QMainWindow):
         layout.addWidget(search_group)
         layout.addWidget(status_group)
         
-        # 在搜尋區域後加入日期範圍選擇
+        # ===日期範圍選擇區域===
         date_group = QWidget()
         date_layout = QHBoxLayout(date_group)
-        
+
         date_layout.addWidget(QLabel("開課日期範圍:"))
-        
+
+        # 計算本月第一天和最後一天的日期
+        current_date = QDate.currentDate()
+        first_day = QDate(current_date.year(), current_date.month(), 1)
+        last_day = QDate(current_date.year(), current_date.month(), current_date.daysInMonth())
+
         self.start_date = QDateEdit()
         self.start_date.setCalendarPopup(True)
-        self.start_date.setDate(QDate.currentDate())
+        self.start_date.setDate(first_day)  # 設定為本月第一天
+        self.start_date.setDisplayFormat("yyyy-MM-dd")  # 設定顯示格式
         date_layout.addWidget(self.start_date)
-        
+
         date_layout.addWidget(QLabel("至"))
-        
+
         self.end_date = QDateEdit()
         self.end_date.setCalendarPopup(True)
-        self.end_date.setDate(QDate.currentDate())
+        self.end_date.setDate(last_day)  # 設定為本月最後一天
+        self.end_date.setDisplayFormat("yyyy-MM-dd")  # 設定顯示格式
         date_layout.addWidget(self.end_date)
-        
+
+        # 日期範圍的啟用/禁用選項
+        self.enable_date_filter = QCheckBox("啟用日期過濾")
+        self.enable_date_filter.setChecked(False)
+        self.enable_date_filter.stateChanged.connect(self.toggle_date_filter)
+        date_layout.addWidget(self.enable_date_filter)
+
         # 清除日期按鈕
-        self.clear_date_btn = QPushButton("清除日期")
-        self.clear_date_btn.clicked.connect(self.clear_date_range)
+        self.clear_date_btn = QPushButton("重設日期")
+        self.clear_date_btn.clicked.connect(self.reset_date_range)
         date_layout.addWidget(self.clear_date_btn)
-        
+
         date_layout.addStretch()
-        
+
         # 將日期選擇區域加入主布局
         layout.addWidget(date_group)
-        
+
         # ===按鈕區域===
         button_group = QWidget()
         button_layout = QHBoxLayout(button_group)
-        
+
         self.start_button = QPushButton("開始爬取")
         self.start_button.clicked.connect(self.start_crawling)
         button_layout.addWidget(self.start_button)
-        
+
         self.stop_button = QPushButton("停止爬取")
         self.stop_button.clicked.connect(self.stop_crawling)
         self.stop_button.setEnabled(False)
         button_layout.addWidget(self.stop_button)
-        
+
         self.export_button = QPushButton("匯出報表")
         self.export_button.clicked.connect(self.export_report)
         self.export_button.setEnabled(False)
         button_layout.addWidget(self.export_button)
-        
+
         layout.addWidget(button_group)
         
         # ===日誌視窗===
@@ -367,12 +382,17 @@ class MainWindow(QMainWindow):
         # 檢查日期範圍
         start_date = None
         end_date = None
-        if self.start_date.date() <= self.end_date.date():
-            start_date = datetime.combine(self.start_date.date().toPyDate(), datetime.min.time())
-            end_date = datetime.combine(self.end_date.date().toPyDate(), datetime.max.time())
+
+        if self.enable_date_filter.isChecked():
+            if self.start_date.date() <= self.end_date.date():
+                start_date = datetime.combine(self.start_date.date().toPyDate(), datetime.min.time())
+                end_date = datetime.combine(self.end_date.date().toPyDate(), datetime.max.time())
+                self.log_message(f"篩選日期範圍: {start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}")
+            else:
+                QMessageBox.warning(self, "警告", "結束日期必須大於等於開始日期")
+                return
         else:
-            QMessageBox.warning(self, "警告", "結束日期必須大於等於開始日期")
-            return
+            self.log_message("未啟用日期過濾")
 
         self._update_ui_state(is_crawling=True)
         self.config.save_config(username, password)
@@ -392,6 +412,24 @@ class MainWindow(QMainWindow):
         self.crawler_thread.data_ready.connect(self.update_course_table)
 
         self.crawler_thread.start()
+
+    def toggle_date_filter(self, state):
+        """切換日期過濾器啟用狀態"""
+        enabled = state == Qt.CheckState.Checked
+        self.start_date.setEnabled(enabled)
+        self.end_date.setEnabled(enabled)
+        self.clear_date_btn.setEnabled(enabled)
+
+    def reset_date_range(self):
+        """重設日期範圍到本月的第一天和最後一天"""
+        current_date = QDate.currentDate()
+        first_day = QDate(current_date.year(), current_date.month(), 1)
+        last_day = QDate(current_date.year(), current_date.month(), current_date.daysInMonth())
+        
+        self.start_date.setDate(first_day)
+        self.end_date.setDate(last_day)
+        self.start_date.clearFocus()
+        self.end_date.clearFocus()
 
     def clear_date_range(self):
         """清除日期範圍"""

@@ -54,10 +54,8 @@ class CourseParser:
                 self.progress.emit(f"無法解析日期: {date_str}")
             return True  # 如果無法解析日期，預設允許通過
             
-        in_range = self.start_date <= course_date <= self.end_date
-        if not in_range and self.progress:
-            self.progress.emit(f"日期 {date_str} 不在指定範圍內")
-        return in_range
+        # 只返回是否在範圍內的結果，不顯示每個被過濾的日期
+        return self.start_date <= course_date <= self.end_date
 
     def get_course_rows(self) -> List[Dict]:
         """抓取課程列表"""
@@ -68,7 +66,7 @@ class CourseParser:
             rows = table.find_elements(By.CSS_SELECTOR, "tbody tr")
             courses = []
             
-            total_rows = len(rows)
+            total_rows = len(rows)  # 這裡定義了 total_rows 變數
             filtered_count = 0
             date_filtered_count = 0
             
@@ -105,8 +103,8 @@ class CourseParser:
                 
                 # 日期範圍資訊
                 if self.start_date and self.end_date:
-                    date_range = (f"日期範圍 {self.start_date.strftime('%Y-%m-%d')} "
-                                f"到 {self.end_date.strftime('%Y-%m-%d')}")
+                    date_range = (f"日期範圍篩選: {self.start_date.strftime('%Y-%m-%d')} "
+                                f"至 {self.end_date.strftime('%Y-%m-%d')}")
                     msgs.append(date_range)
                 
                 # 狀態過濾資訊
@@ -114,10 +112,9 @@ class CourseParser:
                 status_msg = f"符合「{status_str}」狀態的有 {filtered_count + date_filtered_count} 門"
                 msgs.append(status_msg)
                 
-                # 日期過濾後的結果
-                if self.start_date and self.end_date:
-                    date_filter_msg = (f"符合日期範圍的有 {filtered_count} 門\n"
-                                     f"（{date_filtered_count} 門課程因日期範圍不符而被過濾）")
+                # 日期過濾後的結果 - 改為更簡潔的訊息
+                if self.start_date and self.end_date and date_filtered_count > 0:
+                    date_filter_msg = f"符合狀態和日期範圍的有 {filtered_count} 門課程"
                     msgs.append(date_filter_msg)
                 
                 # 發送完整訊息
@@ -294,6 +291,7 @@ class CourseParser:
                 self.progress.emit(f"正在處理第 {idx}/{total_courses} 門課程")
                 self.progress.emit(f"課程名稱: {course['name']}")
                 self.progress.emit(f"課程狀態: {course['status']}")
+                self.progress.emit(f"開課時間: {course['start_time']}")
 
                 success, stats = self.enter_course(course['row_idx'])
                 if success:
