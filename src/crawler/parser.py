@@ -5,16 +5,59 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from typing import List, Dict, Tuple
 import time
+from datetime import datetime
+import re
 
 class CourseParser:
-    def __init__(self, driver, progress=None, search_text=None, status_filters=None):
+    def __init__(self, driver, progress=None, search_text=None, status_filters=None, start_date=None, end_date=None):
         self.driver = driver
         self.wait = WebDriverWait(driver, 30)
         self.progress = progress
         self.stop_crawling = False
         self.search_text = search_text
         self.status_filters = status_filters if status_filters else ["開課中"]
+        self.start_date = start_date
+        self.end_date = end_date
         self.courses = []
+
+    def _parse_date(self, date_str):
+        """解析日期字串，轉換為 datetime 物件"""
+        try:
+            # 移除所有空白字元
+            date_str = date_str.strip()
+            
+            # ewant日期格式通常為 "2024-03-01" 或 "2024/03/01"
+            patterns = [
+                r'(\d{4})-(\d{2})-(\d{2})',  # 匹配 2024-03-01
+                r'(\d{4})/(\d{2})/(\d{2})',  # 匹配 2024/03/01
+            ]
+            
+            for pattern in patterns:
+                match = re.match(pattern, date_str)
+                if match:
+                    year, month, day = map(int, match.groups())
+                    return datetime(year, month, day)
+            return None
+        except Exception as e:
+            if self.progress:
+                self.progress.emit(f"日期解析錯誤 ({date_str}): {str(e)}")
+            return None
+
+    def _is_date_in_range(self, date_str):
+        """檢查日期是否在指定範圍內"""
+        if not (self.start_date and self.end_date):
+            return True
+            
+        course_date = self._parse_date(date_str)
+        if not course_date:
+            if self.progress:
+                self.progress.emit(f"無法解析日期: {date_str}")
+            return True  # 如果無法解析日期，預設允許通過
+            
+        in_range = self.start_date <= course_date <= self.end_date
+        if not in_range and self.progress:
+            self.progress.emit(f"日期 {date_str} 不在指定範圍內")
+        return in_range
 
     def get_course_rows(self) -> List[Dict]:
         """抓取課程列表"""
@@ -27,18 +70,27 @@ class CourseParser:
             
             total_rows = len(rows)
             filtered_count = 0
+            date_filtered_count = 0
             
             for idx, row in enumerate(rows):
                 try:
                     cells = row.find_elements(By.TAG_NAME, "td")
                     if len(cells) >= 8:
                         status = cells[0].text.strip()
+                        start_time = cells[4].text.strip()
+                        
+                        # 檢查日期範圍
+                        if not self._is_date_in_range(start_time):
+                            if status in self.status_filters:
+                                date_filtered_count += 1
+                            continue
+                            
                         if status in self.status_filters:
                             filtered_count += 1
                             courses.append({
                                 'name': cells[2].text.strip(),
                                 'status': status,
-                                'start_time': cells[4].text.strip(),
+                                'start_time': start_time,
                                 'end_time': cells[5].text.strip(),
                                 'row_idx': idx,
                                 'enrolled_count': 0
@@ -48,9 +100,28 @@ class CourseParser:
                     continue
             
             if self.progress:
-                # 顯示更詳細的資訊
+                # 重新組織訊息顯示順序
+                msgs = [f"搜尋到 {total_rows} 門課程"]
+                
+                # 日期範圍資訊
+                if self.start_date and self.end_date:
+                    date_range = (f"日期範圍 {self.start_date.strftime('%Y-%m-%d')} "
+                                f"到 {self.end_date.strftime('%Y-%m-%d')}")
+                    msgs.append(date_range)
+                
+                # 狀態過濾資訊
                 status_str = "、".join(self.status_filters)
-                self.progress.emit(f"搜尋到 {total_rows} 門課程，其中符合「{status_str}」狀態的有 {filtered_count} 門")
+                status_msg = f"符合「{status_str}」狀態的有 {filtered_count + date_filtered_count} 門"
+                msgs.append(status_msg)
+                
+                # 日期過濾後的結果
+                if self.start_date and self.end_date:
+                    date_filter_msg = (f"符合日期範圍的有 {filtered_count} 門\n"
+                                     f"（{date_filtered_count} 門課程因日期範圍不符而被過濾）")
+                    msgs.append(date_filter_msg)
+                
+                # 發送完整訊息
+                self.progress.emit("\n".join(msgs))
                 
             self.courses = courses
             return courses
@@ -202,6 +273,11 @@ class CourseParser:
             # 取得課程列表
             courses = self.get_course_rows()
             total_courses = len(courses)
+
+            # 顯示開始處理的課程
+            if total_courses > 0:
+                self.progress.emit(f"\n將開始處理 {total_courses} 門符合條件的課程...")
+                self.progress.emit("------------------------")
 
             if total_courses == 0:
                 self.progress.emit("未找到符合條件的課程")

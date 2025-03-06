@@ -11,11 +11,13 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QTableWidget,
     QTableWidgetItem,
-    QCheckBox
+    QCheckBox,
+    QDateEdit
 )
 from PyQt6.QtGui import QIcon
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QDate
 import os
+from datetime import datetime
 
 from src.crawler.login import EwantLogin
 from src.crawler.parser import CourseParser
@@ -30,12 +32,14 @@ class CrawlerThread(QThread):
     data_ready = pyqtSignal(list)      # 信號：爬取到的資料
 
     def __init__(self, username: str, password: str, search_text: str = None, 
-                 status_filters: list = None):
+                 status_filters: list = None, start_date=None, end_date=None):
         super().__init__()
         self.username = username
         self.password = password
         self.search_text = search_text
         self.status_filters = status_filters or ["開課中"]
+        self.start_date = start_date
+        self.end_date = end_date
         self.login_manager = None
         self.parser = None
         self.stop_flag = False
@@ -219,6 +223,34 @@ class MainWindow(QMainWindow):
         layout.addWidget(search_group)
         layout.addWidget(status_group)
         
+        # 在搜尋區域後加入日期範圍選擇
+        date_group = QWidget()
+        date_layout = QHBoxLayout(date_group)
+        
+        date_layout.addWidget(QLabel("開課日期範圍:"))
+        
+        self.start_date = QDateEdit()
+        self.start_date.setCalendarPopup(True)
+        self.start_date.setDate(QDate.currentDate())
+        date_layout.addWidget(self.start_date)
+        
+        date_layout.addWidget(QLabel("至"))
+        
+        self.end_date = QDateEdit()
+        self.end_date.setCalendarPopup(True)
+        self.end_date.setDate(QDate.currentDate())
+        date_layout.addWidget(self.end_date)
+        
+        # 清除日期按鈕
+        self.clear_date_btn = QPushButton("清除日期")
+        self.clear_date_btn.clicked.connect(self.clear_date_range)
+        date_layout.addWidget(self.clear_date_btn)
+        
+        date_layout.addStretch()
+        
+        # 將日期選擇區域加入主布局
+        layout.addWidget(date_group)
+        
         # ===按鈕區域===
         button_group = QWidget()
         button_layout = QHBoxLayout(button_group)
@@ -332,6 +364,16 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "警告", "請至少選擇一種課程狀態")
             return
 
+        # 檢查日期範圍
+        start_date = None
+        end_date = None
+        if self.start_date.date() <= self.end_date.date():
+            start_date = datetime.combine(self.start_date.date().toPyDate(), datetime.min.time())
+            end_date = datetime.combine(self.end_date.date().toPyDate(), datetime.max.time())
+        else:
+            QMessageBox.warning(self, "警告", "結束日期必須大於等於開始日期")
+            return
+
         self._update_ui_state(is_crawling=True)
         self.config.save_config(username, password)
         
@@ -340,7 +382,9 @@ class MainWindow(QMainWindow):
             username, 
             password, 
             search_text,
-            status_filters=status_filters
+            status_filters=status_filters,
+            start_date=start_date,
+            end_date=end_date
         )
 
         self.crawler_thread.progress.connect(self.log_message)
@@ -348,6 +392,13 @@ class MainWindow(QMainWindow):
         self.crawler_thread.data_ready.connect(self.update_course_table)
 
         self.crawler_thread.start()
+
+    def clear_date_range(self):
+        """清除日期範圍"""
+        self.start_date.setDate(QDate.currentDate())
+        self.end_date.setDate(QDate.currentDate())
+        self.start_date.clearFocus()
+        self.end_date.clearFocus()
 
     def _create_table_item(self, value, is_numeric=False):
         """建立表格項目"""
