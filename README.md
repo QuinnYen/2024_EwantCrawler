@@ -1,7 +1,8 @@
-# 課程資料爬蟲工具 Ver3.0
+# 課程資料爬蟲工具 Ver4.0
 
 這是一個用於爬取Ewant課程平台上的課程資料的工具。  
-![螢幕擷取畫面 2024-12-23 162645](https://github.com/user-attachments/assets/7369ade3-a4fd-4cc8-b002-999f28712f17)
+![image](https://github.com/user-attachments/assets/6a971597-dd06-4572-905d-1e1bcebf48d6)
+
 
 
 ## 功能
