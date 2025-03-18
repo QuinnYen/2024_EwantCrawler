@@ -17,8 +17,9 @@ from PyQt6.QtWidgets import (
     QProgressBar
 )
 from PyQt6.QtGui import QIcon
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QDate
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QDate, QTimer
 import os
+import psutil
 from datetime import datetime
 
 from src.crawler.login import EwantLogin
@@ -107,28 +108,25 @@ class CrawlerThread(QThread):
             self.parser.stop_crawling = True
             self.parser = None
         
-        if self.login_manager:
+        if self.login_manager and self.login_manager.driver:
             try:
-                if self.login_manager.driver:
-                    # 設定極短的超時時間以加快關閉速度
-                    self.login_manager.driver.set_page_load_timeout(1)
-                    self.login_manager.driver.set_script_timeout(1)
-                    
-                    # 強制關閉所有視窗
-                    try:
-                        self.login_manager.driver.window_handles
-                        for handle in self.login_manager.driver.window_handles:
-                            self.login_manager.driver.switch_to.window(handle)
-                            self.login_manager.driver.close()
-                    except:
-                        pass
-                    
-                    # 強制結束瀏覽器行程
-                    self.login_manager.driver.quit()
-            except Exception as e:
-                print(f"強制關閉瀏覽器時發生錯誤: {str(e)}")
-            finally:
-                self.login_manager = None
+                # 先嘗試透過WebDriver關閉
+                self.login_manager.driver.quit()
+            except:
+                pass
+            
+            # 強制終止所有Chrome進程 (僅用於非生產環境)
+            try:
+                for proc in psutil.process_iter(['pid', 'name']):
+                    if 'chrome' in proc.info['name'].lower() or 'chromedriver' in proc.info['name'].lower():
+                        try:
+                            proc.terminate()  # 嘗試優雅終止
+                        except:
+                            pass
+            except:
+                pass
+                
+            self.login_manager = None
 
 class StopWorker(QObject):
     """停止爬蟲的工作執行緒"""
@@ -625,12 +623,19 @@ class MainWindow(QMainWindow):
             self.log_message("正在停止爬蟲...")
             self.stop_button.setEnabled(False)
             
-            # 停止爬蟲執行緒
+            # 僅設置停止標誌，不等待
             if self.crawler_thread:
                 self.crawler_thread.stop()
-                self.crawler_thread.wait()  # 等待執行緒結束
                 
-            # 更新介面
+                # 創建一個計時器，定期檢查線程是否結束
+                self.check_timer = QTimer()
+                self.check_timer.timeout.connect(self.check_thread_stopped)
+                self.check_timer.start(500)  # 每500毫秒檢查一次
+
+    def check_thread_stopped(self):
+        """檢查爬蟲線程是否已停止"""
+        if not self.crawler_thread or not self.crawler_thread.isRunning():
+            self.check_timer.stop()
             self.is_stopping = False
             self.crawler_thread = None
             if hasattr(self, 'course_table') and self.courses:
