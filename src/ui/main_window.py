@@ -622,3 +622,15 @@ class MainWindow(QMainWindow):
             self.stop_crawling()
             self.crawler_thread.wait()
         event.accept()
+    
+    def _setup_date_filter(self):
+        self.ui.checkBox_date.stateChanged.connect(self._on_date_filter_changed)
+        
+    def _on_date_filter_changed(self, state):
+        is_checked = state == Qt.CheckState.Checked.value
+        self.ui.dateEdit_start.setEnabled(not is_checked)
+        self.ui.dateEdit_end.setEnabled(not is_checked)
+        if is_checked:
+            # 當勾選時，儲存目前的日期值並鎖定
+            self.start_date = self.ui.dateEdit_start.date()
+            self.end_date = self.ui.dateEdit_end.date()
