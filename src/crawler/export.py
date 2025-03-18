@@ -7,7 +7,7 @@ class CourseExporter:
     def __init__(self, table_widget: QTableWidget):
         self.table_widget = table_widget
     
-    def export_to_excel(self) -> bool:
+    def export_to_excel(self, filter_info=None) -> bool:
         """
         將課程資料匯出到 Excel
         Returns:
@@ -19,13 +19,28 @@ class CourseExporter:
                 QMessageBox.warning(None, "警告", "沒有資料可供匯出！")
                 return False
             
+            # 生成預設檔案名稱
+            from datetime import datetime
+            current_datetime = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # 基本檔案名稱
+            file_name_base = "課程報表"
+            
+            # 如果有提供過濾資訊，加入檔案名稱
+            if filter_info:
+                file_name_base += f"_{filter_info}"
+            
+            # 完整的預設檔案名稱
+            default_filename = f"{file_name_base}_{current_datetime}.xlsx"
+            
             # 選擇儲存路徑
             file_path, _ = QFileDialog.getSaveFileName(
                 None, 
                 "匯出 Excel 檔案", 
-                "", 
+                default_filename, 
                 "Excel 檔案 (*.xlsx)"
             )
+
             if not file_path:
                 return False
                 

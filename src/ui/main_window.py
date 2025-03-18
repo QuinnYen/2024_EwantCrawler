@@ -12,7 +12,9 @@ from PyQt6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QCheckBox,
-    QDateEdit
+    QDateEdit,
+    QApplication,
+    QProgressBar
 )
 from PyQt6.QtGui import QIcon
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject, QDate
@@ -30,6 +32,8 @@ class CrawlerThread(QThread):
     finished = pyqtSignal(bool, str)   # 信號：(是否成功, 訊息)
     progress = pyqtSignal(str)         # 信號：進度訊息
     data_ready = pyqtSignal(list)      # 信號：爬取到的資料
+    progress_percent = pyqtSignal(int) # 信號：進度百分比
+    time_remaining = pyqtSignal(str)   # 信號：剩餘時間
 
     def __init__(self, username: str, password: str, search_text: str = None, 
                  status_filters: list = None, start_date=None, end_date=None):
@@ -43,6 +47,7 @@ class CrawlerThread(QThread):
         self.login_manager = None
         self.parser = None
         self.stop_flag = False
+        self.cleanup_timeout = 3  # 設定清理資源的最大等待時間（秒）
         
     def run(self):
         try:
@@ -69,6 +74,8 @@ class CrawlerThread(QThread):
             )
             
             self.parser.data_ready = self.data_ready
+            self.parser.progress_percent = self.progress_percent
+            self.parser.time_remaining = self.time_remaining
 
             try:
                 # 執行爬蟲並獲取結果
@@ -93,18 +100,33 @@ class CrawlerThread(QThread):
             self.finished.emit(False, f"執行過程發生錯誤：{str(e)}")
         
     def stop(self):
-        """停止爬蟲"""
+        """停止爬蟲並快速釋放資源"""
         self.stop_flag = True
+        
         if self.parser:
             self.parser.stop_crawling = True
+            self.parser = None
+        
         if self.login_manager:
             try:
-                # 設定較短的超時時間
-                self.login_manager.driver.set_page_load_timeout(5)
-                self.login_manager.driver.set_script_timeout(5)
-                self.login_manager.close()
+                if self.login_manager.driver:
+                    # 設定極短的超時時間以加快關閉速度
+                    self.login_manager.driver.set_page_load_timeout(1)
+                    self.login_manager.driver.set_script_timeout(1)
+                    
+                    # 強制關閉所有視窗
+                    try:
+                        self.login_manager.driver.window_handles
+                        for handle in self.login_manager.driver.window_handles:
+                            self.login_manager.driver.switch_to.window(handle)
+                            self.login_manager.driver.close()
+                    except:
+                        pass
+                    
+                    # 強制結束瀏覽器行程
+                    self.login_manager.driver.quit()
             except Exception as e:
-                print(f"關閉瀏覽器時發生錯誤: {str(e)}")
+                print(f"強制關閉瀏覽器時發生錯誤: {str(e)}")
             finally:
                 self.login_manager = None
 
@@ -141,6 +163,7 @@ class MainWindow(QMainWindow):
         self.last_valid_row_count = 0
         self.courses = []
         self.is_stopping = False
+        self.showMaximized()
     
     def init_ui(self):
         central_widget = QWidget()
@@ -291,6 +314,39 @@ class MainWindow(QMainWindow):
         self.log_text.setReadOnly(True)
         layout.addWidget(self.log_text)
         
+        # 添加進度條和剩餘時間的容器
+        progress_container = QWidget()
+        progress_layout = QHBoxLayout(progress_container)
+        progress_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMinimum(0)
+        self.progress_bar.setMaximum(100)
+        self.progress_bar.setValue(0)
+
+        # 設置進度條樣式
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: none;
+                border-radius: 6px;
+                background-color: #E0E0E0;
+                text-align: center;
+                color: #333333;
+                font-weight: bold;
+            }
+            QProgressBar::chunk {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #8FE589, stop:1 #00A651);
+            }
+        """)
+
+        progress_layout.addWidget(self.progress_bar)
+        
+        # 添加剩餘時間標籤
+        self.remaining_time_label = QLabel("剩餘時間: --:--")
+        progress_layout.addWidget(self.remaining_time_label)
+        
+        layout.addWidget(progress_container)
+
         # 課程列表
         self.course_table = QTableWidget()
         self.course_table.setColumnCount(20)
@@ -331,7 +387,7 @@ class MainWindow(QMainWindow):
     def setup_window_icon(self):
         """設定視窗圖示"""
         icon_path = ResourceUtils.get_resource_path('icon.ico')
-        if icon_path:
+        if (icon_path):
             app_icon = QIcon(icon_path)
             self.setWindowIcon(app_icon)
     
@@ -408,23 +464,40 @@ class MainWindow(QMainWindow):
         )
 
         self.crawler_thread.progress.connect(self.log_message)
+        self.crawler_thread.progress_percent.connect(self.update_progress)
+        self.crawler_thread.time_remaining.connect(self.update_remaining_time)
         self.crawler_thread.finished.connect(self.handle_crawler_result)
         self.crawler_thread.data_ready.connect(self.update_course_table)
 
+        # 重置進度條和剩餘時間
+        self.progress_bar.setValue(0)
+        self.remaining_time_label.setText("剩餘時間: --:--")
+        self.progress_bar.repaint()
+        self.remaining_time_label.repaint()
+        
         self.crawler_thread.start()
 
     def toggle_date_filter(self, state):
         """切換日期過濾器啟用狀態"""
-        enabled = state == Qt.CheckState.Checked
+        # 不使用state參數的比較，改為直接取得勾選框的當前狀態
+        enabled = self.enable_date_filter.isChecked()
+        
+        # 設置控件啟用狀態
         self.start_date.setEnabled(enabled)
         self.end_date.setEnabled(enabled)
         self.clear_date_btn.setEnabled(enabled)
+        
+        # 強制更新UI
+        QApplication.processEvents()
+        
+        # 在日誌中輸出實際狀態，幫助診斷
+        self.log_message(f"日期過濾已{'啟用' if enabled else '停用'}")
 
     def reset_date_range(self):
         """重設日期範圍到本月的第一天和最後一天"""
-        current_date = QDate.currentDate()
-        first_day = QDate(current_date.year(), current_date.month(), 1)
-        last_day = QDate(current_date.year(), current_date.month(), current_date.daysInMonth())
+        currentDate = QDate.currentDate()
+        first_day = QDate(currentDate.year(), currentDate.month(), 1)
+        last_day = QDate(currentDate.year(), currentDate.month(), currentDate.daysInMonth())
         
         self.start_date.setDate(first_day)
         self.end_date.setDate(last_day)
@@ -578,8 +651,22 @@ class MainWindow(QMainWindow):
         """匯出報表"""
         self.log_message("開始匯出報表...")
         
+        # 生成過濾資訊字串
+        filter_info = None
+        if self.course_table.rowCount() > 0:
+            filter_info = f"{self.course_table.rowCount()}筆資料"
+        
+        # 如果有日期過濾
+        if self.enable_date_filter.isChecked():
+            start_date_str = self.start_date.date().toString("yyyyMMdd")
+            end_date_str = self.end_date.date().toString("yyyyMMdd")
+            if filter_info:
+                filter_info += f"_{start_date_str}到{end_date_str}"
+            else:
+                filter_info = f"{start_date_str}到{end_date_str}"
+        
         exporter = CourseExporter(self.course_table)
-        exporter.export_to_excel()
+        exporter.export_to_excel(filter_info)
     
     def log_message(self, message):
         """添加日誌訊息"""
@@ -634,3 +721,24 @@ class MainWindow(QMainWindow):
             # 當勾選時，儲存目前的日期值並鎖定
             self.start_date = self.ui.dateEdit_start.date()
             self.end_date = self.ui.dateEdit_end.date()
+
+    def update_progress(self, percent):
+        """更新進度條"""
+        try:
+            if percent >= 0 and percent <= 100:
+                self.progress_bar.setValue(percent)
+                # 強制立即更新UI
+                self.progress_bar.repaint()
+            QApplication.processEvents()
+        except Exception as e:
+            print(f"更新進度條時發生錯誤：{str(e)}")
+
+    def update_remaining_time(self, time_text):
+        """更新剩餘時間顯示"""
+        try:
+            self.remaining_time_label.setText(f"剩餘時間: {time_text}")
+            # 強制立即更新UI
+            self.remaining_time_label.repaint()
+            QApplication.processEvents()
+        except Exception as e:
+            print(f"更新剩餘時間時發生錯誤：{str(e)}")

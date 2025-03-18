@@ -13,6 +13,8 @@ class CourseParser:
         self.driver = driver
         self.wait = WebDriverWait(driver, 30)
         self.progress = progress
+        self.progress_percent = None
+        self.time_remaining = None
         self.stop_crawling = False
         self.search_text = search_text
         self.status_filters = status_filters if status_filters else ["開課中"]
@@ -284,24 +286,32 @@ class CourseParser:
 
             # 開始處理每一門課程
             self.progress.emit("\n開始擷取課程資料...")
+            
+            # 添加時間追蹤
+            start_time = time.time()
             processed_times = []
-
+            
             for idx, course in enumerate(courses, 1):
                 course_start_time = time.time()
-
+                
                 if self.stop_crawling:
                     self.progress.emit("使用者停止爬蟲")
                     break
-
-                # 計算進度百分比和預估時間
-                progress_percent = (idx - 1) / total_courses * 100
-                elapsed_time = time.time() - start_process_time
-
+                    
+                # 計算進度百分比
+                progress_percent = int((idx - 1) / total_courses * 100)
+                
+                # 發送進度百分比
+                if hasattr(self, 'progress_percent'):
+                    self.progress_percent.emit(progress_percent)
+                
+                # 計算預估剩餘時間
+                elapsed_time = time.time() - start_time
                 if idx > 1:
-                    avg_time_per_course = sum(processed_times) / len(processed_times)
+                    avg_time_per_course = elapsed_time / (idx - 1)
                     remaining_courses = total_courses - (idx - 1)
                     estimated_time_left = avg_time_per_course * remaining_courses
-
+                    
                     # 格式化時間
                     hours, remainder = divmod(estimated_time_left, 3600)
                     minutes, seconds = divmod(remainder, 60)
@@ -311,15 +321,15 @@ class CourseParser:
                     if minutes > 0:
                         time_str += f"{int(minutes)}分鐘"
                     time_str += f"{int(seconds)}秒"
-
-                    progress_msg = f"正在處理第 {idx}/{total_courses} 門課程 ({progress_percent:.1f}%) - 預估剩餘時間: {time_str}"
-                else:
-                    progress_msg = f"正在處理第 {idx}/{total_courses} 門課程 ({progress_percent:.1f}%)"
-
-                self.progress.emit(progress_msg)
-                self.progress.emit(f"課程名稱: {course['name']}")
-                self.progress.emit(f"課程狀態: {course['status']}")
-                self.progress.emit(f"開課時間: {course['start_time']}")
+                    
+                    # 發送剩餘時間
+                    if hasattr(self, 'time_remaining'):
+                        self.time_remaining.emit(time_str)
+                
+                # 修改日誌訊息，不再包含進度百分比和剩餘時間
+                self.progress.emit(f"正在處理：{course['name']}")
+                self.progress.emit(f"課程狀態：{course['status']}")
+                self.progress.emit(f"開課時間：{course['start_time']}")
 
                 success, stats = self.enter_course(course['row_idx'])
                 if success:
@@ -328,7 +338,7 @@ class CourseParser:
                     # 計算該課程的選修總人數
                     if stats:
                         total_enrolled = sum(stats['選修人數'].values())
-                        self.progress.emit(f"選修總人數: {total_enrolled} 人")
+                        self.progress.emit(f"選修總人數：{total_enrolled} 人")
                     
                     if hasattr(self, 'data_ready'):
                         self.data_ready.emit(courses[:idx])
@@ -341,14 +351,28 @@ class CourseParser:
                     
                     time.sleep(1)
                     self.progress.emit("------------------------")  # 分隔線
+                    
+                    # 更新進度為當前課程完成的百分比
+                    progress_percent = int(idx / total_courses * 100)
+                    if hasattr(self, 'progress_percent'):
+                        self.progress_percent.emit(progress_percent)
+                    
+                    # 記錄課程處理時間
+                    course_elapsed = time.time() - course_start_time
+                    processed_times.append(course_elapsed)
+                    
                 else:
                     self.progress.emit(f"無法擷取課程資料：{course['name']}")
                     return courses
 
-                # 記錄實際處理時間
-                course_elapsed = time.time() - course_start_time
-                processed_times.append(course_elapsed)
-
+            # 最終更新進度為100%
+            if hasattr(self, 'progress_percent'):
+                self.progress_percent.emit(100)
+            
+            # 清除剩餘時間
+            if hasattr(self, 'time_remaining'):
+                self.time_remaining.emit("完成")
+                
             self.progress.emit(f"\n資料擷取完成! 共處理 {total_courses} 門課程")
             return courses
 
