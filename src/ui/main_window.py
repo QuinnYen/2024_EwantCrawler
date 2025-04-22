@@ -56,11 +56,21 @@ class CrawlerThread(QThread):
             self.progress.emit("初始化登入...")
             self.login_manager = EwantLogin(headless=True)
             
+            # 檢查是否提前收到停止信號
+            if self.stop_flag:
+                self.finished.emit(False, "爬蟲已停止")
+                return
+            
             self.progress.emit("開始登入...")
             success, message = self.login_manager.login(self.username, self.password)
             
             if not success:
                 self.finished.emit(False, f"登入失敗：{message}")
+                return
+                
+            # 再次檢查停止信號
+            if self.stop_flag:
+                self.finished.emit(False, "爬蟲已停止")
                 return
 
             # 開始爬取資料
@@ -79,6 +89,11 @@ class CrawlerThread(QThread):
             self.parser.time_remaining = self.time_remaining
 
             try:
+                # 再次檢查停止信號
+                if self.stop_flag:
+                    self.finished.emit(False, "爬蟲已停止")
+                    return
+                    
                 # 執行爬蟲並獲取結果
                 courses = self.parser.process_all_courses()
 
@@ -104,17 +119,24 @@ class CrawlerThread(QThread):
         """停止爬蟲並快速釋放資源"""
         self.stop_flag = True
         
-        if self.parser:
-            self.parser.stop_crawling = True
+        if hasattr(self, 'parser') and self.parser:
+            try:
+                self.parser.stop_crawling = True
+            except Exception as e:
+                print(f"停止parser時出錯: {str(e)}")
             self.parser = None
         
-        if self.login_manager and self.login_manager.driver:
+        if hasattr(self, 'login_manager') and self.login_manager:
             try:
                 # 先嘗試透過WebDriver關閉
-                self.login_manager.driver.quit()
-            except:
-                pass
-            
+                if hasattr(self.login_manager, 'driver') and self.login_manager.driver:
+                    try:
+                        self.login_manager.driver.quit()
+                    except Exception as e:
+                        print(f"關閉WebDriver時出錯: {str(e)}")
+            except Exception as e:
+                print(f"停止login_manager時出錯: {str(e)}")
+                
             # 強制終止所有Chrome進程 (僅用於非生產環境)
             try:
                 for proc in psutil.process_iter(['pid', 'name']):
