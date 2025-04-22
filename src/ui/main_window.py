@@ -347,7 +347,7 @@ class MainWindow(QMainWindow):
 
         # 課程列表
         self.course_table = QTableWidget()
-        self.course_table.setColumnCount(20)
+        self.course_table.setColumnCount(24)
         self.course_table.setHorizontalHeaderLabels([
             '課程狀態',
             '課程名稱',
@@ -365,10 +365,14 @@ class MainWindow(QMainWindow):
             '作業測驗作答次數(台灣)',
             '作業測驗作答次數(中國大陸)',
             '作業測驗作答次數(其他)',
+            '講義參考資料瀏覽人數(台灣)',
+            '講義參考資料瀏覽人數(中國大陸)',
+            '講義參考資料瀏覽人數(其他)',
             '講義參考資料瀏覽次數(台灣)',
             '講義參考資料瀏覽次數(中國大陸)',
             '講義參考資料瀏覽次數(其他)',
-            '討論次數'
+            '討論次數',
+            '使用行動載具瀏覽影片次數'
         ])
 
         # 設定表格屬性
@@ -526,95 +530,103 @@ class MainWindow(QMainWindow):
         return item
 
     def update_course_table(self, courses):
-        """更新課程表格"""
-        try:
-            # 獲取最後有效的資料列
-            if self.crawler_thread and not self.crawler_thread.stop_flag:
-                self.last_valid_row_count = len(courses)
-                self.courses = courses
-            else:
-                courses = courses[:self.last_valid_row_count]
+        """更新課程表格資料"""
+        self.course_table.setRowCount(0)  # 清空表格
+        self.course_table.setRowCount(len(courses))
+        
+        # 設置表頭
+        headers = [
+            "課程狀態", "課程名稱", "開始時間", "結束時間",
+            "選修人數(台灣)", "選修人數(中國大陸)", "選修人數(其他)",
+            "通過人數(台灣)", "通過人數(中國大陸)", "通過人數(其他)",
+            "影片瀏覽次數(台灣)", "影片瀏覽次數(中國大陸)", "影片瀏覽次數(其他)",
+            "作業測驗作答次數(台灣)", "作業測驗作答次數(中國大陸)", "作業測驗作答次數(其他)",
+            "講義參考資料瀏覽人數(台灣)", "講義參考資料瀏覽人數(中國大陸)", "講義參考資料瀏覽人數(其他)",
+            "講義參考資料瀏覽次數(台灣)", "講義參考資料瀏覽次數(中國大陸)", "講義參考資料瀏覽次數(其他)",
+            "討論次數", "使用行動載具瀏覽影片次數"
+        ]
+        self.course_table.setColumnCount(len(headers))
+        self.course_table.setHorizontalHeaderLabels(headers)
+        
+        # 設置表格列寬 - 調整更合理的欄位寬度
+        self.course_table.setColumnWidth(0, 80)   # 課程狀態
+        self.course_table.setColumnWidth(1, 300)  # 課程名稱欄位加寬
+        self.course_table.setColumnWidth(2, 100)  # 開始時間
+        self.course_table.setColumnWidth(3, 100)  # 結束時間
+        
+        # 設定數字類型欄位寬度
+        for col in range(4, 24):
+            self.course_table.setColumnWidth(col, 130)  # 數字類資料欄位
+        
+        # 設置最後兩列較小的寬度
+        self.course_table.setColumnWidth(22, 80)  # 討論次數
+        self.course_table.setColumnWidth(23, 160) # 使用行動載具瀏覽影片次數
+        
+        # 如果有課程數據，則填充表格
+        for row, course in enumerate(courses):
+            # 顯示課程基本資訊
+            self.course_table.setItem(row, 0, self._create_table_item(course["status"]))
+            self.course_table.setItem(row, 1, self._create_table_item(course["name"]))
+            self.course_table.setItem(row, 2, self._create_table_item(course["start_time"]))
+            self.course_table.setItem(row, 3, self._create_table_item(course["end_time"]))
             
-            self.course_table.setRowCount(len(courses))
-            
-            for row, course in enumerate(courses):
-                try:
-                    # 設定基本資訊
-                    self.course_table.setItem(row, 0, self._create_table_item(course.get('status', '')))
-                    self.course_table.setItem(row, 1, self._create_table_item(course['name']))
-                    self.course_table.setItem(row, 2, self._create_table_item(course.get('start_time', '')))
-                    self.course_table.setItem(row, 3, self._create_table_item(course.get('end_time', '')))
+            # 如果有統計資訊，顯示選修人數等統計資料
+            if 'stats' in course and course["stats"]:
+                stats = course["stats"]
+                
+                # 選修人數
+                if '選修人數' in stats:
+                    self.course_table.setItem(row, 4, self._create_table_item(stats['選修人數'].get('台灣', 0), True))
+                    self.course_table.setItem(row, 5, self._create_table_item(stats['選修人數'].get('中國大陸', 0), True))
+                    self.course_table.setItem(row, 6, self._create_table_item(stats['選修人數'].get('其他', 0), True))
+                
+                # 通過人數
+                if '通過人數' in stats:
+                    self.course_table.setItem(row, 7, self._create_table_item(stats['通過人數'].get('台灣', 0), True))
+                    self.course_table.setItem(row, 8, self._create_table_item(stats['通過人數'].get('中國大陸', 0), True))
+                    self.course_table.setItem(row, 9, self._create_table_item(stats['通過人數'].get('其他', 0), True))
+                
+                # 影片瀏覽次數
+                if '影片瀏覽次數' in stats:
+                    self.course_table.setItem(row, 10, self._create_table_item(stats['影片瀏覽次數'].get('台灣', 0), True))
+                    self.course_table.setItem(row, 11, self._create_table_item(stats['影片瀏覽次數'].get('中國大陸', 0), True))
+                    self.course_table.setItem(row, 12, self._create_table_item(stats['影片瀏覽次數'].get('其他', 0), True))
                     
-                    # 設定選修和通過人數資料
-                    if 'stats' in course and course['stats']:
-                        stats = course['stats']
-
-                        numeric_items = [
-                            stats['選修人數']['台灣'],
-                            stats['選修人數']['中國大陸'],
-                            stats['選修人數']['其他'],
-                            stats['通過人數']['台灣'],
-                            stats['通過人數']['中國大陸'],
-                            stats['通過人數']['其他'],
-                            stats.get('影片瀏覽次數', {}).get('台灣', 0),
-                            stats.get('影片瀏覽次數', {}).get('中國大陸', 0),
-                            stats.get('影片瀏覽次數', {}).get('其他', 0),
-                            stats.get('作業測驗作答次數', {}).get('台灣', 0),
-                            stats.get('作業測驗作答次數', {}).get('中國大陸', 0),
-                            stats.get('作業測驗作答次數', {}).get('其他', 0),
-                            stats.get('講義參考資料瀏覽次數', {}).get('台灣', 0),
-                            stats.get('講義參考資料瀏覽次數', {}).get('中國大陸', 0),
-                            stats.get('講義參考資料瀏覽次數', {}).get('其他', 0),
-                            stats.get('討論次數', 0)
-                        ]
-
-                        # 設定所有數字欄位
-                        for col, value in enumerate(numeric_items, start=4):
-                            item = self._create_table_item(value, is_numeric=True)
-                            # 設定對齊方式為靠右
-                            item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                            self.course_table.setItem(row, col, item)
+                # 作業測驗作答次數
+                if '作業測驗作答次數' in stats:
+                    self.course_table.setItem(row, 13, self._create_table_item(stats['作業測驗作答次數'].get('台灣', 0), True))
+                    self.course_table.setItem(row, 14, self._create_table_item(stats['作業測驗作答次數'].get('中國大陸', 0), True))
+                    self.course_table.setItem(row, 15, self._create_table_item(stats['作業測驗作答次數'].get('其他', 0), True))
+                
+                # 講義參考資料瀏覽人數
+                if '講義參考資料瀏覽人數' in stats:
+                    self.course_table.setItem(row, 16, self._create_table_item(stats['講義參考資料瀏覽人數'].get('台灣', 0), True))
+                    self.course_table.setItem(row, 17, self._create_table_item(stats['講義參考資料瀏覽人數'].get('中國大陸', 0), True))
+                    self.course_table.setItem(row, 18, self._create_table_item(stats['講義參考資料瀏覽人數'].get('其他', 0), True))
                     
-                    else:
-                        # 如果沒有統計資料，填入空值
-                        for col in range(4, 20):
-                            self.course_table.setItem(row, col, QTableWidgetItem('0'))
-                        self.log_message(f"第 {row + 1} 筆課程缺少統計資料")
+                # 講義參考資料瀏覽次數
+                if '講義參考資料瀏覽次數' in stats:
+                    self.course_table.setItem(row, 19, self._create_table_item(stats['講義參考資料瀏覽次數'].get('台灣', 0), True))
+                    self.course_table.setItem(row, 20, self._create_table_item(stats['講義參考資料瀏覽次數'].get('中國大陸', 0), True))
+                    self.course_table.setItem(row, 21, self._create_table_item(stats['講義參考資料瀏覽次數'].get('其他', 0), True))
+                
+                # 討論次數
+                if '討論次數' in stats:
+                    self.course_table.setItem(row, 22, self._create_table_item(stats['討論次數'], True))
                     
-                    # 設定每個儲存格的對齊方式
-                    for col in range(20):
-                        item = self.course_table.item(row, col)
-                        if item:
-                            # 課程名稱靠左，其他靠右對齊
-                            if col == 1:  # 課程名稱
-                                item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-                            else:  # 其他欄位
-                                item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-                        
-                except Exception as e:
-                    self.log_message(f"更新第 {row + 1} 筆資料時發生錯誤：{str(e)}")
-            
-            # 調整欄寬並滾動到最下方
-            self.course_table.resizeColumnsToContents()
-            self.course_table.scrollToBottom()
-            self.log_message(f"已更新第{len(courses)}筆資料進入表格")
-
-            # 設定最小欄寬
-            min_width = 80
-            for col in range(2, 20):
-                if self.course_table.columnWidth(col) < min_width:
-                    self.course_table.setColumnWidth(col, min_width)
-            
-            # 課程名稱欄位最小寬度
-            name_col_min_width = 200
-            if self.course_table.columnWidth(1) < name_col_min_width:
-                self.course_table.setColumnWidth(1, name_col_min_width)
-            
-        except Exception as e:
-            self.log_message(f"更新表格時發生錯誤：{str(e)}")
-            
-        # 更新匯出按鈕狀態
-        self.export_button.setEnabled(self.course_table.rowCount() > 0)
+                # 使用行動載具瀏覽影片次數
+                if '使用行動載具瀏覽影片次數' in stats:
+                    self.course_table.setItem(row, 23, self._create_table_item(stats['使用行動載具瀏覽影片次數'], True))
+                    
+        # 設定表格屬性
+        self.course_table.setSortingEnabled(True)  # 啟用排序功能
+        self.course_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)  # 整行選取
+        
+        # 顯示總課程數
+        self.statusBar().showMessage(f"共 {len(courses)} 門課程")
+        
+        # 啟用匯出按鈕
+        self.export_button.setEnabled(len(courses) > 0)
 
     def stop_crawling(self):
         """停止爬取"""

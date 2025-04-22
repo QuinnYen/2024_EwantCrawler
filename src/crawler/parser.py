@@ -131,9 +131,7 @@ class CourseParser:
     def get_enrolled_count(self) -> Dict:
         """抓取課程相關統計資訊"""
         try:
-            # 找到課程選修資訊表格
-            # tables = self.driver.find_elements(By.CSS_SELECTOR, ".table-responsive table")
-            # 直接等待特定表格出現
+            # 等待特定表格出現
             self.wait.until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, ".table-responsive"))
             )
@@ -145,54 +143,149 @@ class CourseParser:
                 '影片瀏覽次數': {'台灣': 0, '中國大陸': 0, '其他': 0},
                 '作業測驗作答次數': {'台灣': 0, '中國大陸': 0, '其他': 0},
                 '講義參考資料瀏覽次數': {'台灣': 0, '中國大陸': 0, '其他': 0},
-                '討論次數': 0
+                '講義參考資料瀏覽人數': {'台灣': 0, '中國大陸': 0, '其他': 0},
+                '討論次數': 0,
+                '使用行動載具瀏覽影片次數': 'N/A'  # 預設值為 N/A
             }
             
-            # 直接找到目標表格
+            # 找到所有表格
             tables = self.driver.find_elements(
                 By.CSS_SELECTOR, 
                 "section.panel .table-responsive table"
             )
-            current_type = '選修人數'
             
-            for table in tables:
+            # 處理兩個表格的資料
+            for table_idx, table in enumerate(tables):
                 try:
                     rows = table.find_elements(By.TAG_NAME, "tr")
+                    current_type = ''
+                    
                     for row in rows:
                         cells = row.find_elements(By.TAG_NAME, "td")
-                        if len(cells) >= 2:
-                            # 解析列的資料
-                            if len(cells) == 3:  # 包含類型的列
-                                current_type = cells[0].text.strip()
-                                region = cells[1].text.strip()
-                                count = self._parse_number(cells[2].text.strip())
-                            else:  # 一般資料列
-                                region = cells[0].text.strip()
-                                count = self._parse_number(cells[1].text.strip())
+                        
+                        # 跳過空行或格式不符的行
+                        if len(cells) < 2:
+                            continue
+                        
+                        # 處理不同格式的表格行
+                        if len(cells) == 3:  # 包含類型的列
+                            type_text = cells[0].text.strip()
+                            region = cells[1].text.strip()
+                            count = self._parse_number(cells[2].text.strip())
                             
-                            # 只處理有效的地區資料
-                            if region in ["台灣", "中國大陸", "其他"]:
-                                if current_type in stats and isinstance(stats[current_type], dict):
+                            # 如果有rowspan，那麼這是一個新類型
+                            if 'rowspan' in cells[0].get_attribute('outerHTML').lower():
+                                current_type = type_text
+                            
+                            # 改進的類型匹配邏輯
+                            if '講義' in current_type and '參考資料' in current_type:
+                                if '瀏覽人數' in current_type:
+                                    # 講義/參考資料瀏覽人數
+                                    if region in ["台灣", "中國大陸", "其他"]:
+                                        stats['講義參考資料瀏覽人數'][region] = count
+                                elif '瀏覽次數' in current_type:
+                                    # 講義/參考資料瀏覽次數
+                                    if region in ["台灣", "中國大陸", "其他"]:
+                                        stats['講義參考資料瀏覽次數'][region] = count
+                            else:
+                                # 其他正常資料的處理
+                                if region in ["台灣", "中國大陸", "其他"] and current_type in stats and isinstance(stats[current_type], dict):
                                     stats[current_type][region] = count
+                                    
+                        elif len(cells) == 2:  # 一般資料列或討論次數
+                            col1_text = cells[0].text.strip()
+                            col2_text = cells[1].text.strip()
+                            
+                            # 處理討論次數
+                            if '討論次數' in col1_text:
+                                stats['討論次數'] = self._parse_number(col2_text)
+                            # 處理行動載具瀏覽影片次數
+                            elif '使用行動載具瀏覽影片次數' in col1_text:
+                                # 如果是純數字就解析，否則保留原值(可能是N/A)
+                                try:
+                                    stats['使用行動載具瀏覽影片次數'] = self._parse_number(col2_text)
+                                except:
+                                    stats['使用行動載具瀏覽影片次數'] = col2_text.strip()
+                            # 處理普通地區資料
+                            elif col1_text in ["台灣", "中國大陸", "其他"] and current_type in stats and isinstance(stats[current_type], dict):
+                                stats[current_type][col1_text] = self._parse_number(col2_text)
+                
                 except Exception as e:
+                    if self.progress:
+                        self.progress.emit(f"處理第 {table_idx+1} 個表格時發生錯誤: {str(e)}")
                     print(f"處理表格時發生錯誤: {str(e)}")
                     continue
             
-            # 平行處理討論次數
+            # 額外處理：直接從表格查找特定文字
             try:
-                discussion_stats = self.driver.find_elements(
-                    By.CSS_SELECTOR, 
-                    ".panel-heading span.badge"
-                )
-                if discussion_stats:
-                    stats['討論次數'] = self._parse_number(discussion_stats[0].text.strip())
+                # 尋找講義/參考資料瀏覽人數和次數的行
+                all_cells = self.driver.find_elements(By.CSS_SELECTOR, ".table tr td")
+                for cell_idx, cell in enumerate(all_cells):
+                    cell_text = cell.text.strip()
+                    
+                    # 檢查是否為講義/參考資料瀏覽人數
+                    if '講義' in cell_text and '參考資料' in cell_text and '瀏覽人數' in cell_text:
+                        try:
+                            # 嘗試獲取相應的地區及數值
+                            region_cells = all_cells[cell_idx+1:cell_idx+7]  # 抓取後續6個單元格
+                            
+                            # 遍歷每個可能的地區單元格
+                            for i in range(0, len(region_cells), 2):
+                                if i+1 < len(region_cells):
+                                    region = region_cells[i].text.strip()
+                                    if region in ["台灣", "中國大陸", "其他"]:
+                                        count = self._parse_number(region_cells[i+1].text.strip())
+                                        stats['講義參考資料瀏覽人數'][region] = count
+                        except Exception as e:
+                            print(f"處理講義/參考資料瀏覽人數時發生錯誤: {str(e)}")
+                    
+                    # 檢查是否為講義/參考資料瀏覽次數
+                    if '講義' in cell_text and '參考資料' in cell_text and '瀏覽次數' in cell_text:
+                        try:
+                            # 嘗試獲取相應的地區及數值
+                            region_cells = all_cells[cell_idx+1:cell_idx+7]  # 抓取後續6個單元格
+                            
+                            # 遍歷每個可能的地區單元格
+                            for i in range(0, len(region_cells), 2):
+                                if i+1 < len(region_cells):
+                                    region = region_cells[i].text.strip()
+                                    if region in ["台灣", "中國大陸", "其他"]:
+                                        count = self._parse_number(region_cells[i+1].text.strip())
+                                        stats['講義參考資料瀏覽次數'][region] = count
+                        except Exception as e:
+                            print(f"處理講義/參考資料瀏覽次數時發生錯誤: {str(e)}")
+                    
+                    # 檢查是否為使用行動載具瀏覽影片次數
+                    if '使用行動載具瀏覽影片次數' in cell_text:
+                        try:
+                            # 檢查是否有下一個單元格
+                            if cell_idx + 1 < len(all_cells):
+                                value_text = all_cells[cell_idx+1].text.strip()
+                                try:
+                                    stats['使用行動載具瀏覽影片次數'] = self._parse_number(value_text)
+                                except:
+                                    stats['使用行動載具瀏覽影片次數'] = value_text
+                        except Exception as e:
+                            print(f"處理使用行動載具瀏覽影片次數時發生錯誤: {str(e)}")
+                    
+                    # 檢查是否為討論次數
+                    if '討論次數' in cell_text and not '人數' in cell_text:
+                        try:
+                            # 討論次數通常在下一個單元格
+                            if cell_idx + 1 < len(all_cells):
+                                count = self._parse_number(all_cells[cell_idx+1].text.strip())
+                                stats['討論次數'] = count
+                        except Exception as e:
+                            print(f"處理討論次數時發生錯誤: {str(e)}")
             except Exception as e:
                 if self.progress:
-                    self.progress.emit(f"處理討論次數時發生錯誤: {str(e)}")
+                    self.progress.emit(f"直接查找特定文字時發生錯誤: {str(e)}")
             
             return stats
                 
         except Exception as e:
+            if self.progress:
+                self.progress.emit(f"抓取統計資訊時發生錯誤: {str(e)}")
             print(f"抓取統計資訊時發生錯誤: {str(e)}")
             return None
 
